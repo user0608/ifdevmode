@@ -5,59 +5,120 @@ import (
 	"strings"
 )
 
-var devmode = []string{
-	strings.ToLower(strings.TrimSpace(os.Getenv("DEBUG"))),
-	strings.ToLower(strings.TrimSpace(os.Getenv("DEBUG_MODE"))),
-	strings.ToLower(strings.TrimSpace(os.Getenv("DEBUGMODE"))),
-	strings.ToLower(strings.TrimSpace(os.Getenv("DEV_MODE"))),
-	strings.ToLower(strings.TrimSpace(os.Getenv("DEVMODE"))),
+var boolEnvKeys = []string{
+	"DEV",
+	"DEV_MODE",
+	"DEVMODE",
+
+	"APP_DEV",
+	"APP_DEV_MODE",
 }
-var positives = map[string]struct{}{
+
+var modeEnvKeys = []string{
+	"ENV",
+	"ENVIRONMENT",
+	"APP_ENV",
+	"APP_MODE",
+	"GO_ENV",
+	"NODE_ENV",
+}
+
+var boolPositives = map[string]struct{}{
 	"true":    {},
 	"1":       {},
 	"on":      {},
 	"enabled": {},
+	"enable":  {},
+	"active":  {},
 	"activo":  {},
 	"si":      {},
+	"sí":      {},
 	"yes":     {},
 	"y":       {},
 }
 
-type options struct {
-	issync    bool
-	executeif func() bool
+var devModes = map[string]struct{}{
+	"dev":         {},
+	"develop":     {},
+	"development": {},
+	"local":       {},
+	"localhost":   {},
 }
 
-type option func(o *options)
+type options struct {
+	sync      bool
+	executeIf func() bool
+}
 
-func WithSyncExecution() option { return func(o *options) { o.issync = true } }
+type Option func(*options)
 
-func WithExecuteOn(fn func() bool) option { return func(o *options) { o.executeif = fn } }
+func WithSyncExecution() Option {
+	return func(o *options) {
+		o.sync = true
+	}
+}
+
+func WithExecuteOn(fn func() bool) Option {
+	return func(o *options) {
+		if fn != nil {
+			o.executeIf = fn
+		}
+	}
+}
 
 func Yes() bool {
-	var isdevmode bool
-	for _, mode := range devmode {
-		if mode != "" {
-			if _, ok := positives[mode]; ok {
-				isdevmode = true
-				break
-			}
-		}
-	}
-	return isdevmode
+	return enabled(os.Getenv)
 }
 
-func Do(fn func(), withs ...option) {
-	var opts options
-	opts.executeif = Yes
-	for _, wth := range withs {
-		wth(&opts)
+func Do(fn func(), opts ...Option) {
+	if fn == nil {
+		return
 	}
-	if opts.executeif() {
-		if opts.issync {
-			fn()
-		} else {
-			go fn()
+
+	cfg := options{
+		executeIf: Yes,
+	}
+
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
 		}
 	}
+
+	if !cfg.executeIf() {
+		return
+	}
+
+	if cfg.sync {
+		fn()
+		return
+	}
+
+	go fn()
+}
+
+func enabled(lookup func(string) string) bool {
+	if lookup == nil {
+		lookup = os.Getenv
+	}
+
+	for _, key := range boolEnvKeys {
+		value := normalize(lookup(key))
+		if _, ok := boolPositives[value]; ok {
+			return true
+		}
+	}
+
+	for _, key := range modeEnvKeys {
+		value := normalize(lookup(key))
+		if _, ok := devModes[value]; ok {
+			return true
+		}
+	}
+
+	return false
+}
+
+func normalize(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }
